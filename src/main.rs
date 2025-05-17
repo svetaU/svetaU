@@ -28,7 +28,7 @@ const COLS: [&str; 8]  = ["#ct", "st", "en", "strand", "fiber", "fiber_length", 
 const WIN_OFFSET: i64 = 50000;
 const INTERVAL: i64 = 1000;
 const MIN_DEPTH: usize = 8;
-const MIN_SCORE: f64 = 120.;
+const MIN_SCORE: f64 = 150.;
 
 
 fn read_into_polars(file_name: &str) -> PolarsResult<DataFrame> {
@@ -179,10 +179,23 @@ fn process_region(region_data: &DataFrame, region_start: i64, region_end: i64) -
 fn main() -> Result<(), Box<dyn Error>>{
 
     let df  = read_into_polars2(&[DATA_PATH,PARQUET_FILE].concat())?;
-    let num_intervals: i64 = 100;
-    let mut r_end: i64 = 13075000;
-    let mut r_begin: i64;
-    let num_threads: usize = 2;
+    //let num_intervals: i64 = 100;
+    //let mut r_end: i64 = 13075000;
+    //let mut r_begin: i64;
+    let mut r_begin = df.clone().lazy().
+        select([col("st").min()]).first()
+        .collect().unwrap()[0].i64().unwrap().to_vec()[0].unwrap()
+        + 2*WIN_OFFSET;
+    let mut r_end = df.clone().lazy().
+        select([col("en").max()]).first()
+        .collect().unwrap()[0].i64().unwrap().to_vec()[0].unwrap()
+        - 2*WIN_OFFSET;
+
+    let num_threads: usize = 10;
+    let num_intervals: i64 = ((r_end - r_begin) / num_threads as i64)/INTERVAL;
+    println!("The total range: {} - {}", r_begin, r_end);
+    //return Ok(());
+    
     let mut file = File::create(&[DATA_PATH,OUTPUT_FILE].concat()).expect("could not create file");
 
     let schema = Schema::from_iter(vec![
@@ -196,9 +209,11 @@ fn main() -> Result<(), Box<dyn Error>>{
 
     let before = Instant::now();
 
+    r_end = r_begin;
     for ind in 0..num_threads {
         r_begin = r_end;
         r_end = r_begin + num_intervals * INTERVAL;
+        println!("thread {} range {} - {}", ind, r_begin, r_end);
 
         let df_loc = df.clone().lazy()
             .filter(col("st").gt(lit(r_begin - WIN_OFFSET))
